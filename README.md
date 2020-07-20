@@ -84,4 +84,28 @@ $drop-highlight: hsla(35, 100%, 77%, 1); /* lighter than motion-primary */
 ```
 ##### 调整后的样子
 
-![image](https://github.com/source-tutorial/scratch-gui/blob/dev/images/colors.png)
+![改造后的界面](https://github.com/source-tutorial/scratch-gui/blob/dev/images/colors.png)
+
+### 理解状态流程图
+> 理解官方给出的Project状态图尤为重要，只有理解了这张图，你才能游刃有余的完成二次开发
+
+![状态流转图](https://github.com/LLK/scratch-gui/raw/develop/docs/project_state_diagram.svg)
+
+#### 例子
+![状态修改例子](https://github.com/LLK/scratch-gui/raw/develop/docs/project_state_example.png)
+
+> 1. 当应用程序第一次挂载时，项目状态为NOT_LOADED。
+> 2. SET_PROJECT_ID redux操作被分派(从src/lib/project-fetche -hoc.jsx)， projectId设置为123456。这将状态从NOT_LOADED转换到FETCHING_WITH_ID。
+> 3. FETCHING_WITH_ID状态。在src / lib / project-fetcher-hoc。jsx, projectId值123456用于从服务器请求该项目的数据。
+> 4. 当服务器响应数据时，src/lib/project-fetcher-hoc。jsx通过projectData集分派DONE_FETCHING_WITH_ID动作。这个动作将状态从FETCHING_WITH_ID转换到LOADING_VM_WITH_ID。
+> 5. LOADING_VM_WITH_ID状态。在src / lib / vm-manager-hoc。在jsx中，我们将projectData加载到Scratch的虚拟机(“vm”)中。
+> 6. 加载完成后，使用src/lib/vm-manager-hoc。jsx分派DONE_LOADING_VM_WITH_ID操作。这将状态从LOADING_VM_WITH_ID转换为SHOWING_WITH_ID
+> 7. SHOWING_WITH_ID状态。现在项目出现正常，是可玩和编辑。
+
+### 通过传入参数projectId来加载远程project
+
+
+
+
+
+====作者努力更新中==,请Star关注动态哦==
