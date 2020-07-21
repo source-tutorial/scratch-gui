@@ -125,7 +125,7 @@ reduxProjectId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
             this.props.setProjectId(hashProjectId.toString());
         }
 ```
-通过this.props.setProjectId方法，通过redux进行状态更改，这里科普一下什么是redux。
+通过this.props.setProjectId方法，采用redux进行状态更改，这里科普一下什么是redux。
 
 >Redux基础知识  
 1. 三个基本原则  
@@ -208,8 +208,191 @@ store.dispatch({ type: 'CHANGE_B', payload: 'Modified b' });
 unsubscribe();
 ```
 
+回到setProject方法，通过dispatch触发action
+
+```
+const mapDispatchToProps = dispatch => ({
+        setProjectId: projectId => {
+            dispatch(setProjectId(projectId));
+        }
+    });
+```
+project状态统一在/src/reducers/project-state.js里管理
+
+```
+const setProjectId = id => ({
+    type: SET_PROJECT_ID,
+    projectId: id
+});
+```
+通过reducers来管理action触发的对状态树的更改，详见代码注释。
+
+```
+const reducer = function (state, action) {
+    if (typeof state === 'undefined') state = initialState;
+    switch (action.type) {
+      case SET_PROJECT_ID:
+        if (state.projectId === action.projectId) {
+            return state;
+        }
+        if (state.loadingState === LoadingState.SHOWING_WITH_ID) {
+            // 如果旧状态已经是SHOWING_WITH_ID(根据ID展示了一个project), 那么当projectId未更改，则阻止重新加载project，设置状态为FETCHING_NEW_DEFAULT
+            // 当projectId非默认取值，则设置状态为FETCHING_WITH_ID，通知对应组件请求远程服务器获取新的project数据
+            if (action.projectId === defaultProjectId || action.projectId === null) {
+                return Object.assign({}, state, {
+                    loadingState: LoadingState.FETCHING_NEW_DEFAULT,
+                    projectId: defaultProjectId
+                });
+            }
+            return Object.assign({}, state, {
+                loadingState: LoadingState.FETCHING_WITH_ID,
+                projectId: action.projectId
+            });
+        } else if (state.loadingState === LoadingState.SHOWING_WITHOUT_ID) {
+            // 如果旧状态是SHOWING_WITHOUT_ID 且 projectId非默认值得，则设置状态为FETCHING_WITH_ID，通知对应组件请求远程服务器获取新的project数据
+            if (action.projectId !== defaultProjectId && action.projectId !== null) {
+                return Object.assign({}, state, {
+                    loadingState: LoadingState.FETCHING_WITH_ID,
+                    projectId: action.projectId
+                });
+            }
+        } else { 
+        // 允许其他不可预知的状态，做相同的处理
+            if (action.projectId === defaultProjectId || action.projectId === null) {
+                return Object.assign({}, state, {
+                    loadingState: LoadingState.FETCHING_NEW_DEFAULT,
+                    projectId: defaultProjectId
+                });
+            }
+            return Object.assign({}, state, {
+                loadingState: LoadingState.FETCHING_WITH_ID,
+                projectId: action.projectId
+            });
+        }
+        return state;
+    }
+    ....
+}
+```
+状态已经处理好了，那么在什么实际执行远程数据获取呢？聪明的你应该想到了高阶组件，没错，就是另一个高阶组件ProjectFetcherHOC，在/src/lib/project-fetcher-hoc.jsx里面。重要代码请看详细注释。
+
+```
+    ...
+    componentDidUpdate (prevProps) {
+            // 设置storage project的Host
+            if (prevProps.projectHost !== this.props.projectHost) {
+                storage.setProjectHost(this.props.projectHost);
+            }
+            // 设置storage asset的Host
+            if (prevProps.assetHost !== this.props.assetHost) {
+                storage.setAssetHost(this.props.assetHost);
+            }
+            // 当前isFetchingWithId=true && 前一个状态isFetchingWithId=false，防止重复加载
+            if (this.props.isFetchingWithId && !prevProps.isFetchingWithId) {
+                // 获取远程project的title
+                this.fetchProjectTitle(this.props.reduxProjectId);
+                // 获取远程project的文件数据
+                this.fetchProject(this.props.reduxProjectId, this.props.loadingState);
+            }
+            // 设置project状态为未变更状态
+            if (this.props.isShowingProject && !prevProps.isShowingProject) {
+                this.props.onProjectUnchanged();
+            }
+            // 设置UI界面上Tab的默认显示代码块导航
+            if (this.props.isShowingProject && (prevProps.isLoadingProject || prevProps.isCreatingNew)) {
+                this.props.onActivateTab(BLOCKS_TAB_INDEX);
+            }
+        }
+        ...
+```
 
 
+```
+fetchProject (projectId, loadingState) {
+            // 通过Scratch-storage加载远程project类型的数据，指定type为JSON
+            // 加载project成功后，将设置project的data数据
+            storage
+                .load(storage.AssetType.Project, projectId, storage.DataFormat.JSON)
+                .then(projectAsset => {
+                    // log('fetch project', projectAsset.data);
+                    if (projectAsset) {
+                        this.props.onFetchedProjectData(projectAsset.data, loadingState);
+                    } else {
+                        // Treat failure to load as an error
+                        // Throw to be caught by catch later on
+                        throw new Error('Could not find project');
+                    }
+                })
+                .catch(err => {
+                    this.props.onError(err);
+                    log.error('fetch project error1 -> ', err);
+                });
+        }
+```
+设置自己远程资源服务器的host，还是在同一份代码文件当中哦。
+
+```
+ProjectFetcherComponent.defaultProps = {
+     assetHost: 'http://localhost:8081/asset', //
+     projectHost: 'http://localhost:8081/project' //
+    };
+```
+加载远程project完成之后的流程是这样子的，状态均通过redux操作，分2种情况处理。
+
+```
+graph LR
+当state=FETCHING_WITH_ID-->LOADING_VM_WITH_ID携带projectData
+当state=FETCHING_NEW_DEFAULT-->LOADING_VM_NEW_DEFAULT携带默认data
+```
+
+#### 远程服务器
+scratch-storage通过restful API格式去请求远程服务器，因此在请求asset，project都会带上资源id。
+
+比如请求projectid=0F381E0267E5D2309F10E8517BF5E50F，则远程服务器的请求api为：  http://localhost:8081/project/0F381E0267E5D2309F10E8517BF5E50  
+
+为了保持scratch-storage的实现不变，服务端需要提供这个格式的restful api。
+
+采用springboot实现是这样子的
+
+```
+@RestController("/project")
+@RequestMapping("/project")
+public class PorjectController {
+...
+@RequestMapping("/{projectId}")
+    @ResponseBody
+    public ResponseDto project(@PathVariable(required = false) String projectId,
+                                       @RequestParam(name = "original_id", required = false) String originalId,
+                                       @RequestParam(name = "is_copy", required = false) boolean isCopy,
+                                       @RequestParam(name = "is_remix", required = false) boolean isRemix,
+                                       @RequestParam(name = "title", required = false) String title,
+                                       @RequestParam(name = "project_version", required = false) String projectVersion,
+                                       final HttpServletResponse response,
+                                       final HttpServletRequest request) throws IOException {
+       
+       // 处理GET请求，也就是加载project数据        
+       // 特别注意： 一定要将project data数据写入到响应的body里面去，scratch-storage是从body取数据的，这里省略了resourceService的实现代码
+       if( method.equalsIgnoreCase(HttpMethod.GET.name()) &&
+                !StringUtils.isEmpty(projectId) &&
+                !projectId.equalsIgnoreCase("0")
+        ) {
+            try {
+                response.setHeader("Content-Type", "application/json;charset=UTF-8");
+                boolean result = resourceService.getProject(response.getOutputStream(), projectId);
+                return result ? new ResponseDto<>(null, ResponseCode.OK) : new ResponseDto<>(null, ResponseCode.Fail);
+            } catch (Exception e){
+                e.printStackTrace();
+            } finally {
+
+            }
+            return new ResponseDto<>(null, ResponseCode.Fail);
+        }
+        ...
+                                           
+                                       }
+                                       ...
+```
+==特别注意：数据一定要以二进制的格式写入到response的body==
 
 
 ====作者努力更新中==,请Star关注动态哦==
