@@ -103,6 +103,110 @@ $drop-highlight: hsla(35, 100%, 77%, 1); /* lighter than motion-primary */
 > 7. SHOWING_WITH_ID状态。现在项目出现正常，是可玩和编辑。
 
 ### 通过传入参数projectId来加载远程project
+#### 如何传入动态projectId参数
+Scratch-gui实现了一个高阶组件，什么是高阶组件，请自行搜索补课噢。
+这个高阶组件叫HashParserHOC，在src/lib/hash-parser-hoc.jsx下，HashParserHOC组件的作用是监听hashchange事件
+
+```
+        componentDidMount () {
+            window.addEventListener('hashchange', this.handleHashChange);
+        }
+```
+通过修改访问地址，携带hash参数即可实现动态传入projectId的功能，例如：http://domain/#projectId=0F381E0267E5D2309F10E8517BF5E50F。我修改了scratch-gui projectId，感觉这里ProjectId用Md5值更合适，不过源码本身也是支持字符串的，projectId的类型定义是这样的
+
+```
+reduxProjectId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+```
+再来看看handleHashChange如何处理动态projectId参数，采用正则匹配projectId，未匹配到则取默认‘0’。
+```
+        handleHashChange () {
+            const hashMatch = window.location.hash.match(/[#]projectId=([^#]\S+)/);
+            const hashProjectId = hashMatch === null ? defaultProjectId : hashMatch[1];
+            this.props.setProjectId(hashProjectId.toString());
+        }
+```
+通过this.props.setProjectId方法，通过redux进行状态更改，这里科普一下什么是redux。
+
+>Redux基础知识  
+1. 三个基本原则  
+- 整个应用只有唯一一个可信数据源，也就是只有一个 Store  
+- State 只能通过触发 Action 来更改  
+- State 的更改必须写成纯函数，也就是每次更改总是返回一个新的 State，在 Redux 里这种函数称为 Reducer
+
+2. Actions  
+
+Action 很简单，就是一个单纯的包含 { type, payload } 的对象，type 是一个常量用来标示动作类型，payload 是这个动作携带的数据。Action 需要通过 store.dispatch() 方法来发送。
+
+    比如一个最简单的 action：
+    
+```
+{
+  type: 'ADD_TODO',
+  text: 'Build my first Redux app'
+}
+```
+
+一般来说，会使用函数（Action Creators）来生成 action，这样会有更大的灵活性，Action Creators 是一个 pure function，它最后会返回一个 action 对象：
+    
+```
+function addTodo(text) {
+  return {
+    type: 'ADD_TODO',
+    text
+  }
+}
+```
+所以现在要触发一个动作只要调用 dispatch: dispatch(addTodo(text))
+
+3. Reducers
+
+Reducer 用来处理 Action 触发的对状态树的更改。
+
+所以一个 reducer 函数会接受 oldState 和 action 两个参数，返回一个新的 state：(oldState, action) => newState。一个简单的 reducer 可能类似这样：
+
+```
+const initialState = {
+  a: 'a',
+  b: 'b'
+};
+
+function someApp(state = initialState, action) {
+  switch (action.type) {
+    case 'CHANGE_A':
+      return { ...state, a: 'Modified a' };
+    case 'CHANGE_B':
+      return { ...state, b: action.payload };
+    default:
+      return state
+  }
+}
+```
+4. Store  
+
+现在有了 Action 和 Reducer，Store 的作用就是连接这两者，Store 的作用有这么几个：  
+- Hold 住整个应用的 State 状态树  
+- 提供一个 getState() 方法获取 State  
+- 提供一个 dispatch() 方法发送 action 更改 State  
+- 提供一个 subscribe() 方法注册回调函数监听 State 的更改  
+- 创建一个 Store 很容易，将 root reducer 函数传递给 createStore 方法即可：
+
+```
+import { createStore } from 'redux';
+import someApp from './reducers';
+let store = createStore(someApp);
+```
+现在我们就拿到了 store.dispatch，可以用来分发 action 了：
+
+```
+let unsubscribe = store.subscribe(() => console.log(store.getState()));
+
+// Dispatch
+store.dispatch({ type: 'CHANGE_A' });
+store.dispatch({ type: 'CHANGE_B', payload: 'Modified b' });
+
+// Stop listening to state updates
+unsubscribe();
+```
 
 
 
