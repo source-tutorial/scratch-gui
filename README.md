@@ -443,5 +443,149 @@ componentDidUpdate (prevProps) {
             ....
         }
 ```
+### storeProject持久化资源
+```aidl
+storeProject (projectId, requestParams) {
+            requestParams = requestParams || {};
+            this.clearAutoSaveTimeout(); // 清理自动保存任务
+            // 在进行异步保存前，获取最新的VM数据，确保保存的结果是最新的数据状态
+            const savedVMState = this.props.vm.toJSON();
+
+            // 返回Promise
+            return Promise.all(this.props.vm.assets
+                .filter(asset => !asset.clean) // 过滤掉干净的，不需要重复存储的资源
+                .map(
+                    // scratch-storage来持久化资源，包括图片，svg，声音，等
+                    asset => storage.store(
+                        asset.assetType,
+                        asset.dataFormat,
+                        asset.data,
+                        asset.assetId
+                    ).then(response => {
+                        // 响应状态
+                        if (response.status !== 'ok') {
+                            return Promise.reject(response.code);
+                        }
+                        // 标记为赶紧的资源，不再持久化
+                        asset.clean = true;
+                    })
+                )
+            )
+                // 更新作品的数据, 和你的业务服务器交互，上传作品数据savedVMState
+                .then(() => this.props.onUpdateProjectData(projectId, savedVMState, requestParams))
+                .then(response => {
+                    // 持久化之后，设置为未更改状态
+                    this.props.onSetProjectUnchanged();
+
+                    const id = response.id.toString();
+
+                    ...
+                    
+                    // 如果服务器返回新的ID，则刷新当前的做，使用hash参数操作
+                    if (id) {
+                        window.location.href = `${window.location.pathname + window.location.search}#projectId=${id}`;
+                        // this.props.onCreatedProject(response.id.toString(), LoadingState.CREATING_COPY);
+                    }
+                    this.reportTelemetryEvent('projectDidSave');
+                    return response;
+                })
+                .catch(err => {
+                    log.error(err);
+                    throw err; // pass the error up the chain
+                });
+        }
+```
+###服务端处理
+> 采用springboot实现的例子
+
+```aidl
+@RestController("/project")
+@RequestMapping("/project")
+public class ProjectController extends AjaxController {
+
+    @Autowired
+    SectionServcie sectionServcie;
+    @Autowired
+    UserService userService;
+    @Autowired
+    HomeworkService homeworkService;
+    @Autowired
+    JedisOpsUtil jedisOpsUtil;
+    @Value("${redis.store.db}")
+    Integer db;
+    @Autowired
+    CookiesUtil cookiesUtil;
+    @Autowired
+    OSSUtils ossUtils;
+    @Autowired
+    ResourceService resourceService;
+    @Autowired
+    ProjectService projectService;
+
+    /**
+     *  复合做作品方法：
+     *  （1）GET 根据projectId，获取作品（xxx.json）。
+     *  （2）POST 上传作品，并根据表单信息，生成entityInfo
+     *  （3）PUT 修改作品
+     * @param projectId 作品ID（创建不需要）
+     * @param originalId 改编来源工程projectId
+     * @param isCopy
+     * @param isRemix 是否改编自其他玩家
+     * @param title 作品标题
+     * @param projectVersion 作品编辑器版本
+     * @return
+     * @throws IOException
+     */
+    @RequestMapping("/{projectId}")
+    @ResponseBody
+    public ResponseDto project(@PathVariable(required = false) String projectId,
+                               @RequestParam(name = "original_id", required = false) String originalId,
+                               @RequestParam(name = "is_copy", required = false) boolean isCopy,
+                               @RequestParam(name = "is_remix", required = false) boolean isRemix,
+                               @RequestParam(name = "title", required = false) String title,
+                               @RequestParam(name = "project_version", required = false) String projectVersion,
+                               final HttpServletResponse response,
+                               final HttpServletRequest request) throws IOException {
+        String method = request.getMethod();
+
+        if( method.equalsIgnoreCase(HttpMethod.GET.name()) &&
+                !StringUtils.isEmpty(projectId) &&
+                !projectId.equalsIgnoreCase("0")) {
+            try {
+                response.setHeader("Content-Type", "application/json;charset=UTF-8");
+                boolean result = resourceService.getProject(response.getOutputStream(), projectId);
+                return result ? new ResponseDto<>(null, ResponseCode.OK) : new ResponseDto<>(null, ResponseCode.Fail);
+            } catch (Exception e){
+                e.printStackTrace();
+            } finally {
+
+            }
+            return new ResponseDto<>(null, ResponseCode.Fail);
+        }
+
+        IUser user = getUser(request);
+        int userId = user != null ? user.getId() : 0;
+        projectVersion = StringUtils.isEmpty(projectVersion) ? "1.0.0" : projectVersion;
+
+        // 新建 前端对新建操作使用post
+        if( method.equalsIgnoreCase(HttpMethod.POST.name())){
+            projectId = MD5Util.md5(String.valueOf(System.currentTimeMillis()));
+        }
+
+        // 修改 前端对修改操作使用put
+        if((method.equalsIgnoreCase(HttpMethod.PUT.name()) && !StringUtils.isEmpty(projectId))
+                || method.equalsIgnoreCase(HttpMethod.POST.name())){
+            // 新建 前端对新建操作使用post
+            if( method.equalsIgnoreCase(HttpMethod.POST.name())){
+                projectId = MD5Util.md5(String.valueOf(System.currentTimeMillis()));
+            }
+            boolean result = resourceService.storeProject(request.getInputStream(), projectId);
+            Project project = projectService.addOrSaveProject(projectId, isRemix, originalId ,title ,projectVersion, userId);
+            return (result && project != null) ? new ResponseDto<>(projectId, ResponseCode.OK) : new ResponseDto<>(projectId, ResponseCode.Fail);
+        }
+
+        return new ResponseDto<>(projectId, ResponseCode.Fail);
+    }
+```
 
 ====作者努力更新中==,请Star关注动态哦==
