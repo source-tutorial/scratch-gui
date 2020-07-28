@@ -392,7 +392,56 @@ public class PorjectController {
                                        }
                                        ...
 ```
-==特别注意：数据一定要以二进制的格式写入到response的body==
+`**特别注意**：数据一定要以**二进制**的格式写入到response的body`
+## 如何保存作品到远程服务器
+> 在src/lib/project-saver-hoc.jsx里面实现
 
+### 核心逻辑代码
+```aidl
+componentDidUpdate (prevProps) {
+            ...
+
+            // 作品发生变化并且当前用户登录成功，那么就启动定时保存，否则未登录提醒登录
+            if (this.props.projectChanged && !prevProps.projectChanged && this.props.isLogined) {
+                this.scheduleAutoSave(); // 会根据属性isShowingSaveable是否开启定时保存作品
+            } else if (this.props.projectChanged && !prevProps.projectChanged && !this.props.isLogined) {
+                this.props.onShowNeedLoginAlert();
+            }
+
+            // 作品是否正在更新中，满足以下条件则正在更新中
+            //  loadingState === LoadingState.AUTO_UPDATING ||
+            //  loadingState === LoadingState.MANUAL_UPDATING ||
+            //  loadingState === LoadingState.UPDATING_BEFORE_COPY ||
+            //  loadingState === LoadingState.UPDATING_BEFORE_NEW
+            if (this.props.isUpdating && !prevProps.isUpdating && this.props.isLogined) {
+                this.updateProjectToStorage(); // 持久化作品
+            } else if (this.props.isUpdating && !prevProps.isUpdating && !this.props.isLogined) {
+                this.props.onShowNeedLoginAlert();
+            }
+            
+            // 是否新建作品
+            if (this.props.isCreatingNew && !prevProps.isCreatingNew) {
+                this.createNewProjectToStorage(); // 保存作品到服务器，并获得做projectId
+            }
+            
+            // 是否复制作品
+            if (this.props.isCreatingCopy && !prevProps.isCreatingCopy && this.props.isLogined) {
+                this.createCopyToStorage(); // 保存作品，返回新的projectId
+            } else if (this.props.isCreatingCopy && !prevProps.isCreatingCopy && !this.props.isLogined) {
+                this.props.onShowNeedLoginAlert();
+            }
+            // 是否改编作品
+            if (this.props.isRemixing && this.props.isLogined && !prevProps.isRemixing) {
+                this.props.onRemixing(true);
+                this.createRemixToStorage(); // 保存作品并返回改编作品的projectId
+            } else if (!this.props.isRemixing && prevProps.isRemixing) {
+                this.props.onRemixing(false);
+            } else if (this.props.isRemixing && !this.props.isLogined && !prevProps.isRemixing) {
+                this.props.onShowNeedLoginAlert();
+            }
+
+            ....
+        }
+```
 
 ====作者努力更新中==,请Star关注动态哦==
